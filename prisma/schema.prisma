@@ -1,0 +1,312 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  CLIENT
+}
+
+enum GSTStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+  CANCELLED
+}
+
+enum ReturnStatus {
+  DRAFT
+  FILED
+  PROCESSED
+  REJECTED
+  OVERDUE
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+}
+
+enum NoticeStatus {
+  RECEIVED
+  IN_PROGRESS
+  REPLIED
+  RESOLVED
+}
+
+enum ServiceType {
+  GST_REGISTRATION
+  RETURN_FILING
+  NOTICE_REPLY
+  AUDIT_SUPPORT
+  ITC_RECONCILIATION
+  REFUND_APPLICATION
+}
+
+enum DocumentType {
+  PAN_CARD
+  AADHAR_CARD
+  BUSINESS_CERTIFICATE
+  GST_CERTIFICATE
+  INVOICE
+  CHALLAN
+  NOTICE
+  BANK_STATEMENT
+  OTHER
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  password  String
+  role      UserRole @default(CLIENT)
+  phone     String?
+  avatar    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  clients   Client[]
+  notifications Notification[]
+  invoices Invoice[]
+
+  @@map("users")
+}
+
+model Client {
+  id          String   @id @default(cuid())
+  businessName String
+  gstin       String?  @unique
+  pan         String
+  email       String
+  phone       String
+  address     String?
+  state       String?
+  businessType String? // Regular, Composition, etc.
+  gstStatus   GSTStatus @default(INACTIVE)
+  createdBy   String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  userId      String
+  user        User @relation(fields: [userId], references: [id])
+  
+  gstRegistrations GSTRegistration[]
+  gstReturns      GSTReturn[]
+  payments        GSTPayment[]
+  refunds         GSTRefund[]
+  documents       Document[]
+  notices         Notice[]
+  services        Service[]
+  invoices        Invoice[]
+
+  @@map("clients")
+}
+
+model GSTRegistration {
+  id             String   @id @default(cuid())
+  applicationNo  String?
+  referenceNo    String?
+  status         String   // Draft, Submitted, Approved, Rejected
+  submittedAt    DateTime?
+  approvedAt     DateTime?
+  arn            String?  // Application Reference Number
+  effectiveDate  DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  // Relations
+  clientId       String
+  client         Client @relation(fields: [clientId], references: [id])
+  
+  documents      Document[]
+
+  @@map("gst_registrations")
+}
+
+model GSTReturn {
+  id           String       @id @default(cuid())
+  returnType   String       // GSTR-1, GSTR-3B, GSTR-4, GSTR-9, etc.
+  period       String       // Month-Year format
+  status       ReturnStatus @default(DRAFT)
+  filedAt      DateTime?
+  processedAt  DateTime?
+  dueDate      DateTime
+  acknowledgementNo String?
+  jsonFile     String?      // Path to JSON file
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  // Relations
+  clientId     String
+  client       Client @relation(fields: [clientId], references: [id])
+  
+  documents    Document[]
+  payments     GSTPayment[]
+
+  @@map("gst_returns")
+}
+
+model GSTPayment {
+  id            String        @id @default(cuid())
+  challanNo     String?
+  paymentType   String        // GST, Interest, Penalty, etc.
+  amount        Float
+  status        PaymentStatus @default(PENDING)
+  paidAt        DateTime?
+  bankReference String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  // Relations
+  clientId      String
+  client        Client @relation(fields: [clientId], references: [id])
+  
+  returnId      String?
+  gstReturn     GSTReturn? @relation(fields: [returnId], references: [id])
+
+  @@map("gst_payments")
+}
+
+model GSTRefund {
+  id            String   @id @default(cuid())
+  applicationNo String?
+  refundType    String   // Excess Tax, Export, etc.
+  amount        Float
+  status        String   // Applied, Processed, Approved, Rejected
+  appliedAt     DateTime?
+  sanctionedAt  DateTime?
+  reason        String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  clientId      String
+  client        Client @relation(fields: [clientId], references: [id])
+  
+  documents     Document[]
+
+  @@map("gst_refunds")
+}
+
+model Document {
+  id          String       @id @default(cuid())
+  name        String
+  type        DocumentType
+  filePath    String       // Path to stored file
+  fileSize    Int?
+  mimeType    String?
+  uploadedAt  DateTime     @default(now())
+  
+  // Relations
+  clientId    String
+  client      Client @relation(fields: [clientId], references: [id])
+  
+  registrationId String?
+  registration   GSTRegistration? @relation(fields: [registrationId], references: [id])
+  
+  returnId    String?
+  gstReturn   GSTReturn? @relation(fields: [returnId], references: [id])
+  
+  refundId    String?
+  refund      GSTRefund? @relation(fields: [refundId], references: [id])
+  
+  noticeId    String?
+  notice      Notice? @relation(fields: [noticeId], references: [id])
+
+  @@map("documents")
+}
+
+model Notice {
+  id          String       @id @default(cuid())
+  noticeNo    String?
+  noticeType  String
+  subject     String
+  receivedAt  DateTime
+  dueDate     DateTime
+  status      NoticeStatus @default(RECEIVED)
+  description String?
+  replyDraft  String?
+  repliedAt   DateTime?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  // Relations
+  clientId    String
+  client      Client @relation(fields: [clientId], references: [id])
+  
+  documents   Document[]
+
+  @@map("notices")
+}
+
+model Service {
+  id          String      @id @default(cuid())
+  type        ServiceType
+  name        String
+  description String?
+  fee         Float
+  status      String      // Pending, In Progress, Completed
+  dueDate     DateTime?
+  completedAt DateTime?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  // Relations
+  clientId    String
+  client      Client @relation(fields: [clientId], references: [id])
+
+  @@map("services")
+}
+
+model Invoice {
+  id          String   @id @default(cuid())
+  invoiceNo   String   @unique
+  amount      Float
+  status      String   // Draft, Sent, Paid, Overdue
+  issuedAt    DateTime
+  dueDate     DateTime
+  paidAt      DateTime?
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  clientId    String
+  client      Client @relation(fields: [clientId], references: [id])
+  
+  userId      String
+  user        User @relation(fields: [userId], references: [id])
+
+  @@map("invoices")
+}
+
+model Notification {
+  id          String   @id @default(cuid())
+  title       String
+  message     String
+  type        String   // Info, Warning, Error, Success
+  isRead      Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  // Relations
+  userId      String
+  user        User @relation(fields: [userId], references: [id])
+
+  @@map("notifications")
+}
